@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vokabeln">
+<title>Vokabeltrainer</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:17px -apple-system,system-ui,sans-serif;background:#f2f2f7;color:#111;
+padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:520px;margin:0 auto;padding:16px}
+nav{display:flex;gap:6px;margin-bottom:16px}
+nav button{flex:1;padding:10px;border:0;border-radius:10px;background:#e0e0e6;font-size:16px}
+nav button.on{background:#c8102e;color:#fff}
+input,select{width:100%;padding:14px;font-size:17px;border:1px solid #ccc;border-radius:10px;margin:6px 0}
+.btn{width:100%;padding:14px;font-size:17px;border:0;border-radius:10px;background:#c8102e;color:#fff;margin:6px 0}
+.btn.alt{background:#555}
+.card{background:#fff;border-radius:14px;padding:20px;text-align:center;font-size:26px;margin:12px 0}
+#fb,#status{min-height:1.5em;text-align:center;margin:8px 0}
+li{background:#fff;border-radius:10px;padding:10px 14px;margin:6px 0;display:flex;
+justify-content:space-between;align-items:center;list-style:none}
+li button{border:0;background:none;font-size:20px}
+ul{padding:0}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<nav>
+ <button id="t_add" class="on" onclick="tab('add')">Neu</button>
+ <button id="t_quiz" onclick="tab('quiz')">Üben</button>
+ <button id="t_list" onclick="tab('list')">Liste</button>
+</nav>
+
+<section id="add">
+ <input id="de" placeholder="Deutsches Wort" autocapitalize="none">
+ <button class="btn alt" onclick="translate()">Übersetzen</button>
+ <input id="es" placeholder="Spanisch (bearbeitbar)" autocapitalize="none">
+ <button class="btn" onclick="add()">Speichern</button>
+ <div id="status"></div>
+</section>
+
+<section id="quiz" hidden>
+ <select id="dir" onchange="next()">
+  <option value="de">Deutsch → Spanisch</option>
+  <option value="es">Spanisch → Deutsch</option>
+  <option value="mix">Gemischt</option>
+ </select>
+ <div class="card" id="q"></div>
+ <input id="ans" autocapitalize="none" autocomplete="off" autocorrect="off">
+ <button class="btn" id="check" onclick="check()">Prüfen</button>
+ <button class="btn alt" id="nextbtn" onclick="next()" hidden>Weiter</button>
+ <div id="fb"></div>
+ <div id="stat" style="text-align:center;color:#666"></div>
+</section>
+
+<section id="list" hidden><ul id="ul"></ul></section>
+</main>
+
+<script>
+const K='vokabeln';
+let words=[];
+try{words=JSON.parse(localStorage.getItem(K)||'[]')}catch(e){}
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(words))}catch(e){}};
+const $=id=>document.getElementById(id);
+const norm=s=>s.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+function tab(n){
+ ['add','quiz','list'].forEach(t=>{$(t).hidden=t!==n;$('t_'+t).classList.toggle('on',t===n)});
+ if(n==='quiz')next();
+ if(n==='list')render();
+}
+
+async function translate(){
+ const de=$('de').value.trim();
+ if(!de)return;
+ $('status').textContent='Übersetze…';
+ try{
+  const r=await fetch('https://api.mymemory.translated.net/get?q='+encodeURIComponent(de)+'&langpair=de|es');
+  const j=await r.json();
+  $('es').value=j.responseData.translatedText.toLowerCase();
+  $('status').textContent='Bitte prüfen und ggf. korrigieren.';
+ }catch(e){$('status').textContent='Keine Verbindung – Spanisch bitte selbst eintragen.'}
+}
+
+function add(){
+ const de=$('de').value.trim(),es=$('es').value.trim();
+ if(!de||!es){$('status').textContent='Bitte beide Felder ausfüllen.';return}
+ words.push({id:Date.now(),de,es,ok:0,bad:0});
+ save();
+ $('de').value='';$('es').value='';
+ $('status').textContent='Gespeichert ✓ ('+words.length+' Wörter)';
+ $('de').focus();
+}
+
+let cur=null,mode='de',answered=false;
+function pick(){
+ const w=words.map(x=>({x,w:1+x.bad*2-Math.min(x.ok,3)*0.25}));
+ const sum=w.reduce((a,b)=>a+b.w,0);
+ let r=Math.random()*sum;
+ for(const i of w){r-=i.w;if(r<=0)return i.x}
+ return w[w.length-1].x;
+}
+function next(){
+ answered=false;
+ $('fb').textContent='';$('ans').value='';
+ $('nextbtn').hidden=true;
+ if(!words.length){
+  $('q').textContent='Noch keine Vokabeln.';
+  $('ans').hidden=true;$('check').hidden=true;return;
+ }
+ $('ans').hidden=false;$('check').hidden=false;
+ let c=pick(),t=0;
+ while(words.length>1&&cur&&c.id===cur.id&&t++<10)c=pick();
+ cur=c;
+ const d=$('dir').value;
+ mode=d==='mix'?(Math.random()<.5?'de':'es'):d;
+ $('q').textContent=mode==='de'?cur.de:cur.es;
+ $('ans').placeholder=mode==='de'?'Auf Spanisch…':'Auf Deutsch…';
+ $('stat').textContent=words.length+' Wörter im Trainer';
+ $('ans').focus();
+}
+function check(){
+ if(answered){next();return}
+ answered=true;
+ const sol=mode==='de'?cur.es:cur.de,a=$('ans').value;
+ if(a.trim().toLowerCase()===sol.toLowerCase()){cur.ok++;$('fb').textContent='✅ Richtig!'}
+ else if(norm(a)===norm(sol)){cur.ok++;$('fb').textContent='✅ Fast – korrekt: '+sol}
+ else{cur.bad++;$('fb').textContent='❌ Richtig wäre: '+sol}
+ save();
+ $('check').hidden=true;$('nextbtn').hidden=false;
+}
+$('ans').addEventListener('keydown',e=>{if(e.key==='Enter')check()});
+
+function render(){
+ const ul=$('ul');ul.innerHTML='';
+ if(!words.length){ul.innerHTML='<li>Noch keine Vokabeln.</li>';return}
+ words.slice().reverse().forEach(w=>{
+  const li=document.createElement('li');
+  const s=document.createElement('span');
+  s.textContent=w.de+' – '+w.es;
+  const b=document.createElement('button');
+  b.textContent='🗑';
+  b.onclick=()=>{words=words.filter(x=>x.id!==w.id);save();render()};
+  li.append(s,b);ul.append(li);
+ });
+}
+</script>
+</body>
+</html>
